@@ -1,0 +1,161 @@
+package main
+
+import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+func main() {
+	keyFile := flag.String("key", "key.txt", "groq api key file")
+	promptFile := flag.String("prompt", "user.txt", "groq prompt file")
+	model := flag.String("model", "openai/gpt-oss-120b", "groq model")
+	config := flag.Bool("config", false, "prepare required files and exit")
+	flag.Parse()
+
+	if *config {
+		{
+			f := mustT(os.Create(*promptFile))
+			must0(f.Close)
+			fmt.Println("edit", *promptFile, "to update prompt")
+		}
+		must0(func() error {
+			_, err := os.Stat(*keyFile)
+			if err == nil {
+				f := mustT(os.Open(*keyFile))
+				var b bytes.Buffer
+				mustT(io.Copy(&b, f))
+				if len(strings.TrimSpace(b.String())) == 0 {
+					fmt.Println("you need to copy you groq key in", *keyFile)
+				}
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				f := mustT(os.OpenFile(*keyFile, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600))
+				must0(f.Close)
+				fmt.Println("copy groq api key in", *keyFile)
+				return nil
+			}
+			return err
+		})
+		return
+	}
+
+	key := must(func() (string, error) {
+		f, err := os.Open(*keyFile)
+		if err != nil {
+			return "", fmt.Errorf("open key file: %w", err)
+		}
+		defer must0(f.Close)
+		var b bytes.Buffer
+		if _, err := io.Copy(&b, f); err != nil {
+			return "", fmt.Errorf("copy key file: %w", err)
+		}
+		return strings.TrimSpace(b.String()), nil
+	})
+
+	prompt := must(func() (string, error) {
+		f := mustT(os.Open(*promptFile))
+		defer must0(f.Close)
+		var b bytes.Buffer
+		mustT(io.Copy(&b, f))
+		return strings.TrimSpace(b.String()), nil
+	})
+
+	var out bytes.Buffer
+
+	{
+		f := mustT(os.Create("response.json"))
+		defer must0(f.Close)
+
+		post(io.MultiWriter(&out, f), *model, prompt, key)
+	}
+
+	var r r
+	must1(json.NewDecoder(&out).Decode(&r))
+
+	f := mustT(os.Create("response.txt"))
+	defer must0(f.Close)
+	mustT(f.WriteString(r.Choices[0].Message.Content))
+}
+
+func post(w io.Writer, model, prompt, key string) {
+	f := mustT(os.Create("payload.json"))
+	defer must0(f.Close)
+
+	must1(
+		json.NewEncoder(f).Encode(
+			j{
+				Model: model,
+				Messages: []msg{
+					{
+						Role:    "user",
+						Content: prompt,
+					},
+				},
+			},
+		),
+	)
+
+	cmd := exec.Command("curl", "https://api.groq.com/openai/v1/chat/completions", "-s",
+		"-H", "Content-Type: application/json",
+		"-H", "Authorization: Bearer "+key,
+		"-d", "@payload.json")
+
+	cmd.Stdout = w
+
+	must0(cmd.Run)
+}
+
+type j struct {
+	Model    string `json:"model"`
+	Messages []msg  `json:"messages"`
+}
+
+type msg struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type r struct {
+	Choices []choice `json:"choices"`
+}
+
+type choice struct {
+	Message message `json:"message"`
+}
+
+type message struct {
+	Content string `json:"content"`
+}
+
+func must1(err error) {
+	mustT(struct{}{}, err)
+}
+
+func mustT[T any](v T, err error) T {
+	return must(func() (T, error) {
+		return v, err
+	})
+}
+
+func must[T any](fn func() (T, error)) T {
+	v, err := fn()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	return v
+}
+
+func must0(fn func() error) {
+	must(func() (struct{}, error) {
+		return struct{}{}, fn()
+	})
+}

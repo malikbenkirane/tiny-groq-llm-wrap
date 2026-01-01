@@ -32,3 +32,10 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Miscellenaous
+*.txt
+*.json
+*.json
+.prepare.yaml
+.commit-stash
