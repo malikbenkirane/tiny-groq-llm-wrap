@@ -11,6 +11,17 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/4sp1/must"
+)
+
+var (
+	mustHaveFile   = must.Have(must.ExitController[*os.File](1))
+	mustHaveInt64  = must.Have(must.ExitController[int64](1))
+	mustHaveInt    = must.Have(must.ExitController[int](1))
+	mustHaveString = must.Have(must.ExitController[string](1))
+	mustHandle     = must.HandleError(must.ExitHandler(1))
+	mustDo         = must.Handle(must.ExitHandler(1))
 )
 
 func main() {
@@ -22,23 +33,23 @@ func main() {
 
 	if *config {
 		{
-			f := mustT(os.Create(*promptFile))
-			must0(f.Close)
+			f := mustHaveFile(os.Create(*promptFile))
+			mustDo(f.Close)
 			fmt.Println("edit", *promptFile, "to update prompt")
 		}
-		must0(func() error {
+		mustDo(func() error {
 			_, err := os.Stat(*keyFile)
 			if err == nil {
-				f := mustT(os.Open(*keyFile))
+				f := mustHaveFile(os.Open(*keyFile))
 				var b bytes.Buffer
-				mustT(io.Copy(&b, f))
+				mustHaveInt64(io.Copy(&b, f))
 				if len(strings.TrimSpace(b.String())) == 0 {
 					fmt.Println("you need to copy you groq key in", *keyFile)
 				}
 			}
 			if errors.Is(err, os.ErrNotExist) {
-				f := mustT(os.OpenFile(*keyFile, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600))
-				must0(f.Close)
+				f := mustHaveFile(os.OpenFile(*keyFile, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600))
+				mustDo(f.Close)
 				fmt.Println("copy groq api key in", *keyFile)
 				return nil
 			}
@@ -47,18 +58,18 @@ func main() {
 		return
 	}
 
-	key := must(func() (string, error) {
+	key := mustHaveString(func() (string, error) {
 		f, err := os.Open(*keyFile)
 		if err != nil {
 			return "", fmt.Errorf("open key file: %w", err)
 		}
-		defer must0(f.Close)
+		defer mustDo(f.Close)
 		var b bytes.Buffer
 		if _, err := io.Copy(&b, f); err != nil {
 			return "", fmt.Errorf("copy key file: %w", err)
 		}
 		return strings.TrimSpace(b.String()), nil
-	})
+	}())
 
 	prompt := must(func() (string, error) {
 		f := mustT(os.Open(*promptFile))
@@ -71,25 +82,25 @@ func main() {
 	var out bytes.Buffer
 
 	{
-		f := mustT(os.Create("response.json"))
-		defer must0(f.Close)
+		f := mustHaveFile(os.Create("response.json"))
+		defer mustDo(f.Close)
 
 		post(io.MultiWriter(&out, f), *model, prompt, key)
 	}
 
 	var r r
-	must1(json.NewDecoder(&out).Decode(&r))
+	mustHandle(json.NewDecoder(&out).Decode(&r))
 
-	f := mustT(os.Create("response.txt"))
-	defer must0(f.Close)
-	mustT(f.WriteString(r.Choices[0].Message.Content))
+	f := mustHaveFile(os.Create("response.txt"))
+	defer mustDo(f.Close)
+	mustHaveInt(f.WriteString(r.Choices[0].Message.Content))
 }
 
 func post(w io.Writer, model, prompt, key string) {
-	f := mustT(os.Create("payload.json"))
-	defer must0(f.Close)
+	f := mustHaveFile(os.Create("payload.json"))
+	defer mustDo(f.Close)
 
-	must1(
+	mustHandle(
 		json.NewEncoder(f).Encode(
 			j{
 				Model: model,
@@ -110,7 +121,7 @@ func post(w io.Writer, model, prompt, key string) {
 
 	cmd.Stdout = w
 
-	must0(cmd.Run)
+	mustDo(cmd.Run)
 }
 
 type j struct {
@@ -133,29 +144,4 @@ type choice struct {
 
 type message struct {
 	Content string `json:"content"`
-}
-
-func must1(err error) {
-	mustT(struct{}{}, err)
-}
-
-func mustT[T any](v T, err error) T {
-	return must(func() (T, error) {
-		return v, err
-	})
-}
-
-func must[T any](fn func() (T, error)) T {
-	v, err := fn()
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	return v
-}
-
-func must0(fn func() error) {
-	must(func() (struct{}, error) {
-		return struct{}{}, fn()
-	})
 }
