@@ -45,3 +45,9 @@ For anyone who feels a little hesitant about diving into the terminal
 
 3. Edit `user.txt`, then double‑click `GoGroq.exe`. After the terminal window
    closes, the file `response.txt` will be created.
+
+## Getting Started with Groq
+
+- Explore the [**Groq Console**](https://console.groq.com).  
+- Generate your credentials in the [**Groq API Keys Console**](https://console.groq.com/keys).  
+- Review the full list of [**Groq models**](https://console.groq.com/docs/models).
