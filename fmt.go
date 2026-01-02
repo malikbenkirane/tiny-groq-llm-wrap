@@ -4,7 +4,6 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +25,7 @@ var (
 
 func main() {
 	keyFile := flag.String("key", "key.txt", "groq api key file")
+	keyEnv := flag.Bool("key-env", false, "read key from GROQ_API_KEY instead of key file")
 	promptFile := flag.String("prompt", "user.txt", "groq prompt file")
 	responseFile := flag.String("response", "response.txt", "response destination file")
 	model := flag.String("model", "openai/gpt-oss-120b", "groq model")
@@ -48,9 +48,10 @@ func main() {
 				mustHaveInt64(io.Copy(&b, f))
 				if len(strings.TrimSpace(b.String())) == 0 {
 					fmt.Println("you need to copy you groq key in", *keyFile)
+					fmt.Println("you can also set GROQ_API_KEY variable and use -key-env flag")
 				}
 			}
-			if errors.Is(err, os.ErrNotExist) {
+			if os.IsNotExist(err) && !*keyEnv {
 				f := mustHaveFile(os.OpenFile(*keyFile, os.O_TRUNC|os.O_WRONLY|os.O_CREATE, 0600))
 				mustDo(f.Close)
 				fmt.Println("copy groq api key in", *keyFile)
@@ -61,18 +62,21 @@ func main() {
 		return
 	}
 
-	key := mustHaveString(func() (string, error) {
-		f, err := os.Open(*keyFile)
-		if err != nil {
-			return "", fmt.Errorf("open key file: %w", err)
-		}
-		defer mustDo(f.Close)
-		var b bytes.Buffer
-		if _, err := io.Copy(&b, f); err != nil {
-			return "", fmt.Errorf("copy key file: %w", err)
-		}
-		return strings.TrimSpace(b.String()), nil
-	}())
+	key := os.Getenv("GROQ_API_KEY")
+	if !*keyEnv {
+		key = mustHaveString(func() (string, error) {
+			f, err := os.Open(*keyFile)
+			if err != nil {
+				return "", fmt.Errorf("open key file: %w", err)
+			}
+			defer mustDo(f.Close)
+			var b bytes.Buffer
+			if _, err := io.Copy(&b, f); err != nil {
+				return "", fmt.Errorf("copy key file: %w", err)
+			}
+			return strings.TrimSpace(b.String()), nil
+		}())
+	}
 
 	var prompt string
 	if *stdin {
